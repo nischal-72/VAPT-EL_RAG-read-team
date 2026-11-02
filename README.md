@@ -72,46 +72,65 @@ DEFENSE_INPUT_SANITIZER=true DEFENSE_OUTPUT_GUARD=true \
 
 ## Results
 
-The 4-configuration Evaluation Matrix (none / input / output / both) produces the
-attack-success-rate (ASR) table below.
+Run the 4-configuration Evaluation Matrix (writes `results/results.csv` and the chart):
 
-| Configuration | Baseline ASR | Mutated ASR |
-| --- | --- | --- |
-| No defense | _pending_ | _pending_ |
-| Input sanitizer only | _pending_ | _pending_ |
-| Output guard only | _pending_ | _pending_ |
-| Both defenses | _pending_ | _pending_ |
+```bash
+uv run python -m ragredteam.evalharness.matrix
+```
 
-> **Not yet measured.** The matrix requires the Evaluation Harness, payload library,
-> and Mutation Engine (PRD §6 Days 3–4), which are not built yet. No ASR numbers are
-> reported here until that harness exists and has run — the table structure is in
-> place to fill in, and the bar chart will be written to `results/`. The two Day 5
-> defenses themselves are built and unit-verified (see below).
+| Configuration | ASR |
+| --- | --- |
+| No defense | 100% |
+| Input sanitizer only | 0% |
+| Output guard only | 100% |
+| Both defenses | 0% |
 
-### Verified so far
+![ASR by configuration](results/asr_by_config.png)
 
-- Smoke test: Ollama, `nomic-embed-text` (768-dim), and ChromaDB load and round-trip.
-- `/ingest` + `/chat` end-to-end, returning `retrieved_chunks`.
-- Poisoning Engine technique #1 plants hidden white-on-white text that the unsanitized
-  ingest path extracts verbatim.
-- Input sanitizer strips that hidden text while keeping visible content; output guard
-  redacts markdown image/link exfil patterns.
+**Scope of this run.** These numbers are over the two **non-operational demonstrator
+probes** shipped in `data/payloads.json` — hidden-text injections that only make the
+model echo a canary token. They exercise the whole pipeline end-to-end but are *not*
+the ≥8-variant exfiltration library of PRD §9. Add your own research payloads to that
+file (schema is documented inline) and re-run the one command above.
+
+**What the numbers say.**
+- The **input sanitizer is decisive against hidden-text injection**: it strips the
+  white-on-white run before chunking, so the planted instruction never reaches the
+  model — ASR 100% → 0%.
+- The **output guard does not help here**: it redacts markdown image/link exfil
+  patterns, but these probes smuggle an *instruction* (canary echo), not a link, so it
+  passes them through — ASR stays 100%.
+- **What still gets through with both defenses on:** for this payload class, nothing —
+  the input sanitizer closes it. The output guard only bites on the exfiltration-link
+  class; the case that would test it is a payload defeating the input sanitizer *and*
+  emitting an exfil link. That is the measurement to run once the §9 library is filled in.
+
+**Mutation Engine.** Verified separately: it rewrites a banned-keyword payload to evade
+the naive filter (e.g. "disregard … instructions" → "set aside … notes") and caches by
+`(technique, payload)` so re-runs are free. The shipped probes contain no banned
+literals, so mutation uplift is 0 on them by construction — a meaningful uplift number
+needs payloads the keyword filter actually catches.
 
 ## Status
 
 - **Days 1–2 (platform):** done — ingest, chat, exfil webhook, poisoning skeleton.
-- **Days 3–4 (red team):** not built — payload library, Evaluation Harness, Mutation Engine.
-- **Days 5–6 (defense + measurement):** defenses + `/config` done; matrix re-run, ASR
-  table, and bar chart pending Days 3–4.
+- **Days 3–4 (red team):** pipeline done — Evaluation Harness, Mutation Engine, naive
+  keyword filter, CSV/chart. Payload **library is a documented schema + two demonstrator
+  probes**; the full ≥8-variant exfiltration set is for you to author.
+- **Days 5–6 (defense + measurement):** done — both defenses, `/config`, 4-config matrix,
+  ASR table, bar chart.
 
 ## Project layout
 
 ```
 src/ragredteam/
-  app/       FastAPI app: /ingest, /chat, /config, /health, bare UI
-  defense/   input_sanitizer.py, output_guard.py
-  exfil/     standalone webhook server
-  poison/    Poisoning Engine (PDF generation)
-  evalharness/, mutation/   (empty — Days 3–4)
-tests/       smoke test
+  app/         FastAPI app: /ingest, /chat, /reset, /config, /health, UI
+  defense/     input_sanitizer.py, output_guard.py, keyword_filter.py
+  exfil/       standalone webhook server
+  poison/      Poisoning Engine (PDF generation)
+  evalharness/ payloads, scoring, runner, matrix, chart, fixtures
+  mutation/    engine (LLM rewrite + deterministic fallback, cached)
+data/          payloads.json (payload library)
+results/       results.csv, asr_by_config.png
+tests/         smoke test
 ```

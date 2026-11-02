@@ -12,5 +12,10 @@ data/pdfs/*
 !data/pdfs/.gitkeep
 results/*
 !results/.gitkeep
+# Keep the published deliverables; ignore transient eval state
+!results/results.csv
+!results/asr_by_config.png
+results/.eval_chroma/
+results/mutation_cache.json
 *.sqlite3
 exfil_log.json

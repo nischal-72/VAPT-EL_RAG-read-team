@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     chunk_tokens: int = 400
     num_predict: int = 128
 
+    # Day 4 naive keyword filter (temporary; mutation evades this)
+    defense_keyword_filter: bool = False
+
     # Day 5 defenses, independently toggleable
     defense_input_sanitizer: bool = False
     defense_output_guard: bool = False

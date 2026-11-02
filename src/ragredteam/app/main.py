@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from ..config import get_settings
 from ..defense.input_sanitizer import extract_visible_text
+from ..defense.keyword_filter import filter_chunks
 from ..defense.output_guard import screen
 from .ingest import chunk_text, extract_text
 from .store import get_store
@@ -44,6 +45,7 @@ def config() -> dict:
     s = get_settings()
     return {
         "defenses": {
+            "keyword_filter": s.defense_keyword_filter,
             "input_sanitizer": s.defense_input_sanitizer,
             "output_guard": s.defense_output_guard,
         },
@@ -52,6 +54,20 @@ def config() -> dict:
         "num_predict": s.num_predict,
         "llm_model": s.ollama_llm_model,
     }
+
+
+@app.post("/reset")
+def reset() -> dict:
+    # Test/eval affordance (not a frozen contract): wipe the collection so each harness
+    # payload is scored against only its own freshly-ingested document, with no leakage
+    # from previously ingested docs in the persistent store.
+    s = get_settings()
+    try:
+        get_store()._client.delete_collection(s.collection)
+    except Exception:
+        pass
+    get_store.cache_clear()
+    return {"status": "reset"}
 
 
 @app.post("/ingest")
@@ -63,6 +79,8 @@ async def ingest(file: UploadFile = File(...)) -> dict:
     else:
         text = extract_text(pdf_bytes)  # VULN: raw extraction, no sanitization
     chunks = chunk_text(text, s.chunk_tokens)
+    if s.defense_keyword_filter:
+        chunks = filter_chunks(chunks)  # Day 4 naive filter
     doc_id = uuid.uuid4().hex[:12]
     get_store().add_texts(
         texts=chunks,
