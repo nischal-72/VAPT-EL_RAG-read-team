@@ -13,6 +13,8 @@ from langchain_ollama import ChatOllama
 from pydantic import BaseModel
 
 from ..config import get_settings
+from ..defense.input_sanitizer import extract_visible_text
+from ..defense.output_guard import screen
 from .ingest import chunk_text, extract_text
 from .store import get_store
 
@@ -36,12 +38,31 @@ def health() -> dict:
     }
 
 
+@app.get("/config")
+def config() -> dict:
+    # Exposes which defenses are active so the Evaluation Matrix can tag each run (PRD §6 Day 5).
+    s = get_settings()
+    return {
+        "defenses": {
+            "input_sanitizer": s.defense_input_sanitizer,
+            "output_guard": s.defense_output_guard,
+        },
+        "top_k": s.top_k,
+        "chunk_tokens": s.chunk_tokens,
+        "num_predict": s.num_predict,
+        "llm_model": s.ollama_llm_model,
+    }
+
+
 @app.post("/ingest")
 async def ingest(file: UploadFile = File(...)) -> dict:
     pdf_bytes = await file.read()
     s = get_settings()
-    # VULN: extracted text is chunked and stored with no sanitization (see ingest.py).
-    chunks = chunk_text(extract_text(pdf_bytes), s.chunk_tokens)
+    if s.defense_input_sanitizer:
+        text, _stripped = extract_visible_text(pdf_bytes)  # Day 5 input defense
+    else:
+        text = extract_text(pdf_bytes)  # VULN: raw extraction, no sanitization
+    chunks = chunk_text(text, s.chunk_tokens)
     doc_id = uuid.uuid4().hex[:12]
     get_store().add_texts(
         texts=chunks,
@@ -72,6 +93,9 @@ def chat(body: ChatIn) -> dict:
         temperature=0,
     )
     response = llm.invoke(prompt).content
+
+    if s.defense_output_guard:
+        response, _blocked = screen(response)  # Day 5 output defense
 
     # Chunks returned for debugging/scoring per the Query contract — not shown to end users.
     retrieved_chunks = [
