@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Secrets
+.env
+
+# Runtime state
+chroma_db/
+data/pdfs/*
+!data/pdfs/.gitkeep
+results/*
+!results/.gitkeep
+*.sqlite3
+exfil_log.json
